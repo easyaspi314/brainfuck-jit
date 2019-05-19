@@ -29,12 +29,14 @@
 typedef void (*brainfuck_t)(void *(*memset_ptr)(void *, int, size_t), int (*putchar_ptr)(int), int (*getchar_ptr)(void));
 
 // Instruction modes. Subtracting is treated as negative addition.
-#define ADD_POINTER 1
-#define ADD_DATA 2
-#define PUT_CHAR 3
-#define GET_CHAR 4
-#define JUMP 5
-#define CMP 6
+#define ADD_POINTER '>'
+#define SUB_POINTER '<'
+#define ADD_DATA '+'
+#define SUB_DATA '-'
+#define PUT_CHAR '.'
+#define GET_CHAR ','
+#define JUMP '['
+#define CMP ']'
 
 static int commit(int mode, int amount, unsigned char **out)
 {
@@ -257,7 +259,7 @@ void brainfuck(const char *code, size_t len)
         // We don't actually parse instruction by instruction. We actually delay by at least one instruction
         // so we can join consecutive +- and <>s. commit() will write to the opcodes_iterator.
         switch (code[i]) {
-        case '+': // increment value at pointer
+        case ADD_DATA: // increment value at pointer
             if (mode != ADD_DATA) {
                 commit(mode, combine, &opcodes_iterator);
                 mode = ADD_DATA;
@@ -265,7 +267,7 @@ void brainfuck(const char *code, size_t len)
             }
             ++combine;
             break;
-        case '-': // decrement value at pointer
+        case SUB_DATA: // decrement value at pointer
             if (mode != ADD_DATA) {
                 commit(mode, combine, &opcodes_iterator);
                 mode = ADD_DATA;
@@ -273,15 +275,7 @@ void brainfuck(const char *code, size_t len)
             }
             --combine;
             break;
-        case '<': // decrement pointer
-            if (mode != ADD_POINTER) {
-                commit(mode, combine, &opcodes_iterator);
-                mode = ADD_POINTER;
-                combine = 0;
-            }
-            --combine;
-            break;
-        case '>': // increment pointer
+        case ADD_POINTER: // increment pointer
             if (mode != ADD_POINTER) {
                 commit(mode, combine, &opcodes_iterator);
                 mode = ADD_POINTER;
@@ -289,13 +283,21 @@ void brainfuck(const char *code, size_t len)
             }
             ++combine;
             break;
-        case '[': // begin loop
+        case SUB_POINTER: // decrement pointer
+            if (mode != ADD_POINTER) {
+                commit(mode, combine, &opcodes_iterator);
+                mode = ADD_POINTER;
+                combine = 0;
+            }
+            --combine;
+            break;
+        case JUMP: // begin loop
             commit(mode, combine, &opcodes_iterator);
             mode = JUMP;
             combine = 0;
             *loops_iterator++ = opcodes_iterator + 5; // push the address of this opcode to the stack
             break;
-        case ']': { // end loop
+        case CMP: { // end loop
             commit(mode, combine, &opcodes_iterator);
             mode = CMP;
             combine = 0;
@@ -316,12 +318,12 @@ void brainfuck(const char *code, size_t len)
             memcpy(start - 4, &diff, sizeof(int));
             break;
         }
-        case '.': // putchar()
+        case PUT_CHAR: // putchar()
             commit(mode, combine, &opcodes_iterator);
             mode = PUT_CHAR;
             combine = 0;
             break;
-        case ',': // getchar()
+        case GET_CHAR: // getchar()
             commit(mode, combine, &opcodes_iterator);
             mode = GET_CHAR;
             combine = 0;
