@@ -23,7 +23,7 @@ int main(int argc, char *argv[])
             close(fd);
             return 1;
         }
-        size_t len = st.st_size;
+        off_t len = st.st_size;
         char *buf = (char *)malloc(len + 1);
         if (!buf) {
             puts("Out of memory");

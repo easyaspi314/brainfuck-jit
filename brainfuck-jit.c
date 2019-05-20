@@ -37,157 +37,138 @@ typedef void (*brainfuck_t)(void *(*memset_ptr)(void *, int, size_t), int (*putc
 #define GET_CHAR ','
 #define JUMP '['
 #define CMP ']'
-
-static int commit(int mode, int amount, unsigned char **out)
+static inline void commit(int mode, int amount, unsigned char **out)
 {
     switch (mode) {
     case ADD_POINTER:
         if (amount == 0)
-            return 0;
+            return;
 
         if (amount == 1) {
 #ifdef DEBUG
-            puts("	inc	rbx");
+            printf("        inc     rbx\n");
 #endif
-            *(*out)++ = 0x48;
-            *(*out)++ = 0xff;
-            *(*out)++ = 0xc3;
-            return 3;
+            (*out)[0] = 0x48;
+            (*out)[1] = 0xff;
+            (*out)[2] = 0xc3;
+            *out += 3;
         } else if (amount == -1) {
 #ifdef DEBUG
-            puts("	dec	rbx");
+            printf("        dec     rbx\n");
 #endif
-            *(*out)++ = 0x48;
-            *(*out)++ = 0xff;
-            *(*out)++ = 0xcb;
-            return 3;
-        } else if (amount < 0) {
-            amount = -amount;
-#ifdef DEBUG
-            printf("	sub	rbx, %i\n", amount);
-#endif
-            *(*out)++ = 0x48;
-            *(*out)++ = 0x81;
-            *(*out)++ = 0xeb;
-            memcpy(*out, &amount, sizeof(int));
-            *out += sizeof(int);
-            return 7;
+            (*out)[0] = 0x48;
+            (*out)[1] = 0xff;
+            (*out)[2] = 0xcb;
+            *out += 3;
         } else {
 #ifdef DEBUG
-            printf("	add	rbx, %i\n", amount);
+            printf("        add     rbx, %i\n", amount);
 #endif
-            *(*out)++ = 0x48;
-            *(*out)++ = 0x81;
-            *(*out)++ = 0xc3;
-            memcpy(*out, &amount, sizeof(int));
-            *out += sizeof(int);
-            return 7;
+            (*out)[0] = 0x48;
+            (*out)[1] = 0x81;
+            (*out)[2] = 0xc3;
+            memcpy(*out + 3, &amount, sizeof(int));
+            *out += 7;
         }
+        return;
     case ADD_DATA:
         if (amount == 0)
-            return 0;
+            return;
 
         if (amount == 1) {
 #ifdef DEBUG
-            puts("	inc	byte ptr[rbx]");
+            printf("        inc     byte ptr[rbx]\n");
 #endif
-            *(*out)++ = 0xfe;
-            *(*out)++ = 0x03;
-            return 2;
+            (*out)[0] = 0xfe;
+            (*out)[1] = 0x03;
+            *out += 2;
         } else if (amount == -1) {
 #ifdef DEBUG
-            puts("	dec	byte ptr[rbx]");
+            printf("        dec     byte ptr[rbx]\n");
 #endif
-            *(*out)++ = 0xfe;
-            *(*out)++ = 0x0b;
-            return 2;
-        } else if (amount < 0) {
-#ifdef DEBUG
-            printf("	sub	byte ptr[rbx], %i\n", (-amount) % 256);
-#endif
-            *(*out)++ = 0x80;
-            *(*out)++ = 0x2b;
-            *(*out)++ = (-amount) % 256;
-            return 3;
+            (*out)[0] = 0xfe;
+            (*out)[1] = 0x0b;
+            *out += 2;
         } else {
 #ifdef DEBUG
-            printf("	add	byte ptr[rbx], %i\n", (amount) % 256);
+            printf("        add     byte ptr[rbx], %i\n", amount & 0xFF);
 #endif
-            *(*out)++ = 0x80;
-            *(*out)++ = 0x03;
-            *(*out)++ = amount % 256;
-            return 3;
+            (*out)[0] = 0x80;
+            (*out)[1] = 0x03;
+            (*out)[2] = amount & 0xFF;
+            *out += 3;
         }
+        return;
     case JUMP: // We jump to the corresponding ] and do the comparison there.
 #ifdef DEBUG
-        puts("	jmp	<unknown>");
+        printf("        jmp     <tba>\n");
 #endif
-        *(*out)++ = 0xe9;
-        *out += 4; // placeholder, we insert the address later.
-        return 5;
+        (*out)[0] = 0xe9;
+        *out += 5; // placeholder, we insert the address later.
+        return;
     case CMP:
 #ifdef DEBUG
-        puts("	cmp	byte ptr[rbx], 0");
+        printf("        cmp     byte ptr[rbx], 0\n");
 #endif
-        *(*out)++ = 0x80;
-        *(*out)++ = 0x3b;
-        *(*out)++ = 0x00;
+        (*out)[0] = 0x80;
+        (*out)[1] = 0x3b;
+        (*out)[2] = 0x00;
 #ifdef DEBUG
-        puts("	jne	<unknown>");
+        printf("        jne     <tba>\n");
 #endif
-        *(*out)++ = 0x0F;
-        *(*out)++ = 0x85;
-        *out += 4; // placeholder, we insert the address later.
-        return 9;
+        (*out)[3] = 0x0F;
+        (*out)[4] = 0x85;
+        *out += 9; // placeholder, we insert the address later.
+        return;
     case PUT_CHAR:
 #ifdef DEBUG
-        puts("	movzx	edi, byte ptr[rbx]"); // zero extend to int
+        printf("        movzx   edi, byte ptr[rbx]\n"); // zero extend to int
 #endif
-        *(*out)++ = 0x0f;
-        *(*out)++ = 0xb6;
-        *(*out)++ = 0x3b;
+        (*out)[0] = 0x0f;
+        (*out)[1] = 0xb6;
+        (*out)[2] = 0x3b;
 #ifdef DEBUG
-        puts("	call	r14"); // call putchar (which is in rbp)
+        printf("        call    r14\n"); // call putchar (which is in rbp)
 #endif
-        *(*out)++ = 0x41;
-        *(*out)++ = 0xff;
-        *(*out)++ = 0xd6;
-        return 6;
+        (*out)[3] = 0x41;
+        (*out)[4] = 0xff;
+        (*out)[5] = 0xd6;
+        *out += 6;
+        return;
     case GET_CHAR: // Calls getchar (r12), and then stores the result in the address of rbx.
 #ifdef DEBUG
-        puts("	call	r12\n");
+        printf("        call    r12\n");
 #endif
-        *(*out)++ = 0x41;
-        *(*out)++ = 0xff;
-        *(*out)++ = 0xd4;
+        (*out)[0] = 0x41;
+        (*out)[1] = 0xff;
+        (*out)[2] = 0xd4;
 #ifdef DEBUG
-        puts("	mov	byte ptr[rbx], eax");
+        printf("        mov     byte ptr[rbx], eax\n");
 #endif
-        *(*out)++ = 0x88;
-        *(*out)++ = 0x03;
-        return 5;
+        (*out)[3] = 0x88;
+        (*out)[4] = 0x03;
+        *out += 5;
+        return;
     default:
-        return 0;
+        return;
     }
 }
 
+// Executes the code with light JIT optimization.
 void brainfuck(const char *code, size_t len)
 {
-#ifdef DEBUG
-    printf("Optimizing BF code: \"%s\"\n", code);
-#endif
     int mode = 0, combine = 0;
 
     // Our stack to hold loop pointers. We use the worst case scenario in which every char is a loop starter so we don't need to realloc.
-    // wesmart
+    // This prevents a lot of checking at the cost of more memory.
     unsigned char **loops = (unsigned char **)calloc(len, sizeof(unsigned char *));
     if (!loops) {
-        puts("out of memory");
+        printf("out of memory\n");
         exit(1);
     }
     unsigned char **loops_iterator = loops;
 
-    // Map the JIT memory
+    // Map the JIT memory.
     unsigned char *opcodes = (unsigned char *)mmap(
                                  NULL,                               // request a new pointer
                                  9 * len + 128,                      // Account for the worst case, 9 byte opcodes each plus the init routine
@@ -197,7 +178,7 @@ void brainfuck(const char *code, size_t len)
                                  0                                   // offset: we don't care
                              );
     if (!opcodes) {
-        puts("out of memory");
+        printf("out of memory\n");
         free(loops);
         exit(1);
     }
@@ -251,7 +232,24 @@ void brainfuck(const char *code, size_t len)
         // mov rbx, rsp - our cell pointer
         0x48, 0x89, 0xe3,
     };
-
+#ifdef DEBUG
+    printf(
+        "brainfuck:\n"
+        "        push    rbx\n"
+        "        push    r12\n"
+        "        push    r13\n"
+        "        push    r14\n"
+        "        mov     r13, rdi\n"
+        "        mov     r14, rsi\n"
+        "        mov     r12, rdx\n"
+        "        sub     rsp, 0x8000\n"
+        "        mov     rdi, rsp\n"
+        "        xor     esi, esi\n"
+        "        mov     edx, 0x8000\n"
+        "        call    r13\n"
+        "        mov     rbx, rsp\n"
+    );
+#endif
     memcpy(opcodes_iterator, init, sizeof(init));
     opcodes_iterator += sizeof(init);
 
@@ -298,17 +296,44 @@ void brainfuck(const char *code, size_t len)
             *loops_iterator++ = opcodes_iterator + 5; // push the address of this opcode to the stack
             break;
         case CMP: { // end loop
-            commit(mode, combine, &opcodes_iterator);
-            mode = CMP;
-            combine = 0;
             if (loops_iterator == loops) { // if our stack is empty, fail
-                puts("Extra ]");
+                printf("position %zu: Extra ']'n", i);
                 free(loops);
                 munmap(opcodes, 9 * len + 128);
                 exit(1);
             }
             // Pop from our stack
             unsigned char *start = *--loops_iterator;
+
+            // Basic optimization: Convert clear loops ([-] and [+]) to *cell = 0;
+            // Because of our delayed commit system, we can tell if this happened if we
+            // haven't moved from the previous JUMP instruction (opcodes_iterator hasn't been
+            // incremented since then), and the mode of the previous instruction was ADD_DATA.
+            //
+            // We only do it with odd increments: Since arithmetic is modulo 256, something like
+            // [--] isn't guaranteed to not be an infinite loop.
+            if (start == opcodes_iterator && mode == ADD_DATA && (combine & 1) == 1) {
+#ifdef DEBUG
+                 printf("converting clear loop!!!\n");
+#endif
+                 // Overwrite the first jmp
+                 opcodes_iterator = start - 5;
+#ifdef DEBUG
+                 printf("        mov     byte ptr[rbx], 0 # overwrite previous\n");
+#endif
+                 *opcodes_iterator++ = 0xc6;
+                 *opcodes_iterator++ = 0x03;
+                 *opcodes_iterator++ = 0x00;
+                 // Reset the mode
+                 mode = 0;
+                 combine = 0;
+                 // break early
+                 break;
+            }
+
+            commit(mode, combine, &opcodes_iterator);
+            mode = CMP;
+            combine = 0;
             // The difference between the instruction after jne and the beginning of the loop
             int diff = start - opcodes_iterator - 9;
             // store the jne address
@@ -333,7 +358,7 @@ void brainfuck(const char *code, size_t len)
         }
     }
     if (loops_iterator != loops) { // missing ]
-        puts("Missing ]");
+        printf("Position %zu: Missing ]\n", len - 1);
         munmap(opcodes, 9 * len + 128);
         free(loops);
         exit(1);
@@ -357,7 +382,16 @@ void brainfuck(const char *code, size_t len)
         // ret
         0xc3
     };
-
+#ifdef DEBUG
+    printf(
+        "        add     rsp, 0x8000\n"
+        "        pop     r14\n"
+        "        pop     r13\n"
+        "        pop     r12\n"
+        "        pop     rbx\n"
+        "        ret\n"
+    );
+#endif
     memcpy(opcodes_iterator, cleanup, sizeof(cleanup));
 
 #ifdef DEBUG // debug file to check output
@@ -366,12 +400,13 @@ void brainfuck(const char *code, size_t len)
     fclose(f);
 #endif
 
-    // now cast to a function pointer
+    // Now cast to a function pointer (technically nonstandard)...
     brainfuck_t fuck = (brainfuck_t)opcodes;
-    // and call with our function pointers to memset, getchar, and putchar
+    // and call with our function pointers to memset, getchar, and putchar.
+    // Time to fuck!
     fuck(&memset, &putchar, &getchar);
 
-    // Now cleanup
+    // Now cleanup everything and return
     munmap(opcodes, 9 * len + 128);
     free(loops);
 }
