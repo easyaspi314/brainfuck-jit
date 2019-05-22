@@ -1,10 +1,10 @@
 # brainfuck-jit
 
-A lightly optimizing JIT Brainfuck interpreter for x86_64, as well as generic interpreter.
+A lightly optimizing JIT Brainfuck interpreter for ARMv5+ and x86_64, as well as generic interpreter.
 
-x86_64 JIT is supported on both *nix and Windows. Other platforms use a generic interpreter.
+x86_64 and ARM JIT are supported on both *nix and Windows. Other platforms use a generic interpreter.
 
-i386, ARMv6 and aarch64 JITs are planned as well.
+i386 and aarch64 JITs are planned as well.
 
 ```c
 void brainfuck(const char *code, size_t len);

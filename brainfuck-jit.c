@@ -42,6 +42,8 @@ typedef void (*brainfuck_t)(unsigned char *cells_ptr, int (*putchar_ptr)(int), i
 
 #if !defined(USE_FALLBACK) && (defined(__x86_64__) || defined(__amd64__) || defined(_M_X64) || defined(_M_AMD64))
 #   define JIT_MODE 1 // x86_64
+#elif !defined(USE_FALLBACK) && defined(__arm__) && __ARM_ARCH >= 5
+#   define JIT_MODE 2 // ARM
 #else
 #   define JIT_MODE 0 // fallback
 #endif
@@ -87,8 +89,10 @@ typedef void (*brainfuck_t)(unsigned char *cells_ptr, int (*putchar_ptr)(int), i
 //    static void write_clear_loop(unsigned char *start, unsigned char **out);
 #   if JIT_MODE == 1
 #      include "brainfuck-jit-x86_64.h"
+#   elif JIT_MODE == 2
+#      include "brainfuck-jit-arm.h"
 #   else
-#     error "Unknown CPU target"
+#      error "Unknown CPU target"
 #   endif
 #endif
 
