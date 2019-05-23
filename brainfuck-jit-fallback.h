@@ -13,7 +13,7 @@
  */
 
 
-/// brainfuck-kit-fallback.h: Portable, non-JIT interpreter. Still has decent performance.
+/// brainfuck-jit-fallback.h: Portable, non-JIT interpreter. Still has decent performance.
 #ifndef BRAINFUCK_JIT_FALLBACK_H
 #define BRAINFUCK_JIT_FALLBACK_H
 
@@ -43,6 +43,7 @@
 static void interpret_opcodes(int *restrict opcodes, size_t len, unsigned char *restrict cell)
 {
     size_t i= 0;
+    int current = 0;
     while (i < len) {
         int mode = opcodes[i++];
         int value = opcodes[i++];
@@ -52,22 +53,24 @@ static void interpret_opcodes(int *restrict opcodes, size_t len, unsigned char *
 #ifdef DEBUG
             printf("cell += %d;\n", value);
 #endif
+            *cell = current;
             cell += value;
+            current = *cell;
             break;
         case INSN_ADD_DATA:
 #ifdef DEBUG
             printf("*cell += %d;\n", value);
 #endif
-            *cell += value;
+            current += value;
             break;
         case INSN_PUT_CHAR:
 #ifdef DEBUG
             printf("putchar(%d /* %c */ );\n", *cell, *cell);
 #endif
-            putchar(*cell);
+            putchar(current);
             break;
         case INSN_GET_CHAR:
-            *cell = getchar();
+            current = getchar();
 #ifdef DEBUG
             printf("*cell = getchar(); /* %i */;\n", *cell);
 #endif
@@ -77,13 +80,13 @@ static void interpret_opcodes(int *restrict opcodes, size_t len, unsigned char *
 #ifdef DEBUG
             printf("*cell = 0;\n");
 #endif
-            *cell = 0;
+            current = 0;
             break;
         case INSN_JUMP:
 #ifdef DEBUG
             printf("if (%i == 0) {\n i += %i;\n}\n", *cell, value);
 #endif
-            if (*cell == 0) {
+            if (current == 0) {
                 i += value;
             }
             break;
@@ -91,7 +94,7 @@ static void interpret_opcodes(int *restrict opcodes, size_t len, unsigned char *
 #ifdef DEBUG
             printf("if (%i != 0) {\n    i += %i;\n}\n", *cell, value);
 #endif
-            if (*cell != 0) {
+            if (current != 0) {
                 i += value;
             }
             break;
@@ -145,14 +148,12 @@ static void commit(int mode, int amount, unsigned char **out)
 }
 
 // Fills in the offset for a jump.
-static void fill_in_jump(unsigned char *restrict start, unsigned char *restrict opcodes_iterator)
+static void fill_in_jump(int *restrict start, int *restrict opcodes_iterator)
 {
-    int *start_i = (int *)start;
-    int *ops_i = (int *)opcodes_iterator;
-    int diff = start_i - ops_i - 2;
-    ops_i[1] = diff;
-    diff = ops_i - start_i;
-    start_i[-1] = diff;
+    int diff = start - opcodes_iterator - 2;
+    opcodes_iterator[1] = diff;
+    diff = opcodes_iterator - start;
+    start[-1] = diff;
 }
 
 // Writes the cleanup code for our interpreter. A.K.A. nothing.
@@ -164,9 +165,10 @@ static void write_cleanup_code(unsigned char **out)
 // Overwrites a clear loop with a zero loop
 static void write_clear_loop(unsigned char *restrict start, unsigned char **restrict out)
 {
-    int *opcodes_iterator = (int *)(start);
+    int *opcodes_iterator = (int *)start;
     opcodes_iterator[0] = INSN_ZERO;
     *out = start + 2 * sizeof(int);
 }
 
 #endif // BRAINFUCK_JIT_FALLBACK_H
+
