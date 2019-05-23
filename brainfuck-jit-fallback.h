@@ -148,8 +148,10 @@ static void commit(int mode, int amount, unsigned char **out)
 }
 
 // Fills in the offset for a jump.
-static void fill_in_jump(int *restrict start, int *restrict opcodes_iterator)
+static void fill_in_jump(unsigned char *restrict start_raw, unsigned char *restrict opcodes_iterator_raw)
 {
+    int *start = (int *)start_raw;
+    int *opcodes_iterator= (int *)opcodes_iterator_raw;
     int diff = start - opcodes_iterator - 2;
     opcodes_iterator[1] = diff;
     diff = opcodes_iterator - start;
