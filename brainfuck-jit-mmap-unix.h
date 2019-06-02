@@ -25,7 +25,7 @@
 #include <stddef.h>
 #include <sys/mman.h>
 
-static unsigned char *alloc_opcodes(size_t len)
+static raw_opcode *alloc_opcodes(size_t len)
 {
 #ifdef UNSAFE // -DUNSAFE: Writes in RWX mode. Slightly faster, but less safe
     int prot = PROT_READ | PROT_WRITE | PROT_EXEC;
@@ -33,25 +33,22 @@ static unsigned char *alloc_opcodes(size_t len)
     int prot = PROT_READ | PROT_WRITE;
 #endif
     int flags = MAP_ANONYMOUS | MAP_PRIVATE;
-    unsigned char *buf = (unsigned char *)mmap(NULL, len, prot, flags, -1, 0);
+    raw_opcode *buf = (raw_opcode *)mmap(NULL, len, prot, flags, -1, 0);
     return buf;
 }
 
-// Allocates a buffer using mmap, copies opcodes, marks executable, and runs.
-static void run_opcodes(unsigned char *restrict buf, size_t len, unsigned char *restrict cells)
+static void protect_opcodes(raw_opcode *buf, size_t len)
 {
-#ifndef UNSAFE
-    // Mark our region as R^X
+#ifdef UNSAFE
+    (void)buf;
+    (void)len;
+#else
     mprotect(buf, len, PROT_READ | PROT_EXEC);
 #endif
-    // Cast to a function pointer
-    brainfuck_t fuck = (brainfuck_t)buf;
-    // and fuck it!
-    fuck(cells, &putchar, &getchar);
 }
 
 // Unmaps our buffer
-static void dealloc_opcodes(unsigned char *buf, size_t len)
+static void dealloc_opcodes(raw_opcode *buf, size_t len)
 {
     munmap(buf, len);
 }

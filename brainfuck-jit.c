@@ -17,6 +17,10 @@
 #include <stdio.h> // printf
 #include <stdlib.h> // calloc
 #include <string.h> // memset, memcpy
+#include <stdint.h> // uintN_t, intN_t
+#ifndef __cplusplus
+#   include <stdbool.h> // bool
+#endif
 
 #include "brainfuck-jit.h"
 
@@ -28,29 +32,72 @@
 #    endif
 #endif
 
-typedef void (*brainfuck_t)(unsigned char *cells_ptr, int (*putchar_ptr)(int), int (*getchar_ptr)(void));
+#ifdef DEBUG
+#   define bf_log(...) printf(__VA_ARGS__)
+#else
+#   define bf_log(...) ((void)0)
+#endif
+
+typedef void (*brainfuck_t)(uint8_t *cells_ptr, int (*putchar_ptr)(int), int (*getchar_ptr)(void));
 
 // Instruction modes. Subtracting is treated as negative addition.
-#define ADD_POINTER '>'
-#define SUB_POINTER '<'
-#define ADD_DATA '+'
-#define SUB_DATA '-'
-#define PUT_CHAR '.'
-#define GET_CHAR ','
-#define JUMP '['
-#define CMP ']'
+// All should fit in unsigned char!
+typedef enum {
+    bf_opcode_add = '+',
+    bf_opcode_sub = '-', // unused
+    bf_opcode_move = '>',
+    bf_opcode_move_left = '<', // unused
+    bf_opcode_put = '.',
+    bf_opcode_get = ',',
+    bf_opcode_start = '[',
+    bf_opcode_end = ']',
+    bf_opcode_clear = '0',
+    bf_opcode_copy_mul = '*',
+    bf_opcode_ret = 'r',
+    bf_opcode_nop = '\0',// 'n' | ((int)'n' << 8) | ((int)'n' << 16) | ((int)'n' << 24)
+} bf_opcode_type;
 
-#if !defined(USE_FALLBACK) && (defined(__x86_64__) || defined(__amd64__) || defined(_M_X64) || defined(_M_AMD64))
-#   define JIT_MODE 1 // x86_64
-#elif !defined(USE_FALLBACK) && defined(__arm__) && __ARM_ARCH >= 5
-#   define JIT_MODE 2 // ARM
+typedef struct {
+    int op;
+    int32_t amount;
+} bf_opcode;
+#ifdef C_BACKEND
+#include "brainfuck-backend-c.h"
 #else
-#   define JIT_MODE 0 // fallback
+#if !defined(USE_FALLBACK) && (defined(__x86_64__) || defined(__amd64__) || defined(_M_X64) || defined(_M_AMD64) || defined(__i386__) || defined(_M_IX86))
+#   define JIT_MODE 1 // x86
+#elif !defined(USE_FALLBACK) && (defined(__aarch64__) || defined(__arm64__) || defined(_M_ARM64))
+#   define JIT_MODE 2 // aarch64
+#elif !defined(USE_FALLBACK) && defined(__arm__) && __ARM_ARCH >= 5
+#   define JIT_MODE 3 // ARMv5
+#else
+#   define JIT_MODE 0 // Fallback interpreter.
 #endif
 
 #if JIT_MODE == 0
-#   include "brainfuck-jit-fallback.h"
+#   include "brainfuck-interp.h"
 #else
+
+// Should include the following implementations:
+//    // The longest instruction for allocating a large enough buffer
+//    #define MAX_INSN_LEN N
+//    // The size of the init routine
+//    #define INIT_LEN N
+//    // The size of the cleanup routine
+//    #define CLEANUP_LEN N
+//    // Converts a bf_opcode into native code, incrementing pos
+//    static void compile_opcode(bf_opcode *restrict opcode, uint8_t *restrict out, size_t *restrict pos)
+
+#   if JIT_MODE == 1
+#      include "brainfuck-jit-x86.h"
+#   elif JIT_MODE == 2
+#      include "brainfuck-jit-aarch64.h"
+#   elif JIT_MODE == 3
+#      include "brainfuck-jit-arm.h"
+#   else
+#      error "Unknown CPU target"
+#   endif
+
 // should include the following implementations:
 //     // Allocates the opcodes.
 //     static unsigned char *alloc_opcodes(size_t amount);
@@ -66,54 +113,36 @@ typedef void (*brainfuck_t)(unsigned char *cells_ptr, int (*putchar_ptr)(int), i
 #  else
 #     error "Unknown OS!"
 #  endif
-
-// Should include the following implementations:
-//    // The longest instruction for allocating a large enough buffer
-//    #define MAX_INSN_LEN N
-//    // The size of the init routine
-//    #define INIT_LEN N
-//    // The size of the cleanup routine
-//    #define CLEANUP_LEN N
-//    // The number of bytes a jump instruction takes up to add to the loop stack
-//    #define JUMP_INSN_LEN N
-//    // Writes the initialization opcodes into *out and increments
-//    static void write_init_code(unsigned char **out);
-//    // Outputs opcodes into *out, given the mode and amount, incrementing *out by the number of bytes written
-//    static void commit(int mode, int amount, unsigned char **out);
-//    // Writes the cleanup opcodes into *out and increments
-//    static void write_cleanup_code(unsigned char **out);
-//    // The code to write the offset for a jump instruction into out. It is expected that commit will jump
-//    // over the code inserted by this function.
-//    static void fill_in_jump(unsigned char *start, unsigned char *opcodes_iterator);
-//    // The code to overwrite a jump with a clear loop
-//    static void write_clear_loop(unsigned char *start, unsigned char **out);
-#   if JIT_MODE == 1
-#      include "brainfuck-jit-x86_64.h"
-#   elif JIT_MODE == 2
-#      include "brainfuck-jit-arm.h"
-#   else
-#      error "Unknown CPU target"
-#   endif
+#  include "brainfuck-jit-runner.h"
 #endif
+#endif
+#include "brainfuck-ir.h"
+
 
 // Executes the code with light JIT optimization.
 void brainfuck(const char *code, size_t len)
 {
-    int mode = 0, combine = 0;
+    int32_t mode = bf_opcode_nop, combine = 0;
+    bool leaf = false;
+
+    {
+        volatile int32_t neg1 = -1;
+        if (neg1 >> 5 != -1) {
+            printf("Need 2's complement arithmetic shift right!\n");
+            exit(1);
+        }
+    }
 
     // Our stack to hold loop pointers. We use the worst case scenario in which every char is a loop starter so we don't need to realloc.
     // This prevents a lot of checking at the cost of more memory.
-    unsigned char **loops = (unsigned char **)calloc(len, sizeof(unsigned char *));
+    bf_opcode **loops = (bf_opcode **)malloc(len * sizeof(bf_opcode *));
     if (!loops) {
         printf("out of memory\n");
         exit(1);
     }
-    unsigned char **loops_iterator = loops;
+    bf_opcode **loops_iterator = loops;
 
-    // More than enough memory.
-    size_t memlen = len * MAX_INSN_LEN + INIT_LEN + CLEANUP_LEN;
-    // Map the memory for our opcodes.
-    unsigned char *opcodes = alloc_opcodes(memlen);
+    bf_opcode *opcodes = (bf_opcode *)calloc(len + 128, sizeof(bf_opcode));
 
     if (!opcodes) {
         printf("out of memory\n");
@@ -121,10 +150,7 @@ void brainfuck(const char *code, size_t len)
         exit(1);
     }
 
-    unsigned char *opcodes_iterator = opcodes;
-
-    // Write the initialization opcodes.
-    write_init_code(&opcodes_iterator);
+    bf_opcode *opcodes_iterator = opcodes;
 
     for (size_t i = 0; i < len; i++) {
         // We don't actually output opcodes immediately after reading an instruction. We actually
@@ -134,45 +160,46 @@ void brainfuck(const char *code, size_t len)
         // it will write to the opcodes_iterator. combine holds the number of additions or subtractions
         // we use.
         switch (code[i]) {
-        case ADD_DATA: // increment value at pointer
-            if (mode != ADD_DATA) {
+        case bf_opcode_add: // increment value at pointer
+            if (mode != bf_opcode_add) {
                 commit(mode, combine, &opcodes_iterator);
-                mode = ADD_DATA;
+                mode = bf_opcode_add;
                 combine = 0;
             }
             ++combine;
             break;
-        case SUB_DATA: // decrement value at pointer
-            if (mode != ADD_DATA) {
+        case bf_opcode_sub: // decrement value at pointer
+            if (mode != bf_opcode_add) {
                 commit(mode, combine, &opcodes_iterator);
-                mode = ADD_DATA;
+                mode = bf_opcode_add;
                 combine = 0;
             }
             --combine;
             break;
-        case ADD_POINTER: // increment pointer
-            if (mode != ADD_POINTER) {
+        case bf_opcode_move: // increment pointer
+            if (mode != bf_opcode_move) {
                 commit(mode, combine, &opcodes_iterator);
-                mode = ADD_POINTER;
+                mode = bf_opcode_move;
                 combine = 0;
             }
             ++combine;
             break;
-        case SUB_POINTER: // decrement pointer
-            if (mode != ADD_POINTER) {
+        case bf_opcode_move_left: // decrement pointer
+            if (mode != bf_opcode_move) {
                 commit(mode, combine, &opcodes_iterator);
-                mode = ADD_POINTER;
+                mode = bf_opcode_move;
                 combine = 0;
             }
             --combine;
             break;
-        case JUMP: // begin loop
+        case bf_opcode_start: // begin loop
             commit(mode, combine, &opcodes_iterator);
-            mode = JUMP;
+            mode = bf_opcode_start;
             combine = 0;
-            *loops_iterator++ = opcodes_iterator + JUMP_INSN_LEN; // push the address of the next opcode to the stack
+            leaf = true;
+            *loops_iterator++ = opcodes_iterator; // push the address of the next opcode to the stack
             break;
-        case CMP: { // end loop
+        case bf_opcode_end: { // end loop
             if (loops_iterator == loops) { // if our stack is empty, fail
                 printf("position %zu: Extra ']'n", i);
                 free(loops);
@@ -180,41 +207,42 @@ void brainfuck(const char *code, size_t len)
                 exit(1);
             }
             // Pop from our stack
-            unsigned char *start = *--loops_iterator;
+            bf_opcode *start = *--loops_iterator;
 
             // Basic optimization: Convert clear loops ([-] and [+]) to *cell = 0;
             // Because of our delayed commit system, we can tell if this happened if we
-            // haven't moved from the previous JUMP instruction (opcodes_iterator hasn't been
-            // incremented since then), and the mode of the previous instruction was ADD_DATA.
+            // haven't moved from the previous bf_opcode_begin instruction (opcodes_iterator hasn't been
+            // incremented since then), and the mode of the previous instruction was bf_opcode_add.
             //
             // We only do it with odd increments: Since arithmetic is modulo 256, something like
             // [--] isn't guaranteed to not be an infinite loop.
-            if (start == opcodes_iterator && mode == ADD_DATA && (combine & 1) == 1) {
-#ifdef DEBUG
-                 printf("converting clear loop!!!\n");
-#endif
+            if (start == opcodes_iterator - 1 && mode == bf_opcode_add) {
+                 bf_log("converting clear loop!!!\n");
                  write_clear_loop(start, &opcodes_iterator);
                  // Reset the mode
-                 mode = 0;
+                 mode = bf_opcode_nop;
                  combine = 0;
                  // break early
                  break;
             }
 
             commit(mode, combine, &opcodes_iterator);
-            mode = CMP;
+            mode = bf_opcode_end;
             combine = 0;
-            fill_in_jump(start, opcodes_iterator);
+            if (fill_in_jump(start, &opcodes_iterator, leaf)) {
+                mode = bf_opcode_nop;
+            }
+            leaf = false; // not in a leaf anymore
             break;
         }
-        case PUT_CHAR: // putchar()
+        case bf_opcode_put: // putchar()
             commit(mode, combine, &opcodes_iterator); // always commit
-            mode = PUT_CHAR;
+            mode = bf_opcode_put;
             combine = 0;
             break;
-        case GET_CHAR: // getchar()
+        case bf_opcode_get: // getchar()
             commit(mode, combine, &opcodes_iterator);
-            mode = GET_CHAR;
+            mode = bf_opcode_get;
             combine = 0;
             break;
         default: // ignore
@@ -233,40 +261,10 @@ void brainfuck(const char *code, size_t len)
 
     // Last call to commit() to handle the final instruction
     commit(mode, combine, &opcodes_iterator);
+    size_t opcodes_len = opcodes_iterator - opcodes;
 
-    // Write the cleanup routine
-    write_cleanup_code(&opcodes_iterator);
-
-#ifdef DEBUG // debug files to check real output
-    FILE *f = fopen("bf.o", "wb");
-    FILE *f2 = fopen("bf.s", "w");
-
-    // raw opcodes
-    fwrite(opcodes, 1, opcodes_iterator - opcodes, f);
-    // asm file with .byte directives
-    fprintf(f2, "        .text\n"
-                "        .globl fuck\n"
-                "fuck:\n");
-    for (size_t i = 0; i < opcodes_iterator - opcodes; i++) {
-        fprintf(f2, "        .byte %#02x\n", opcodes[i]);
-    }
-    fclose(f);
-    fclose(f2);
-#endif
-
-    // Create our cells with 64 KiB
-    const size_t cellsize = 65536;
-    unsigned char *cells = (unsigned char *)calloc(1, cellsize);
-    if (!cells) {
-        printf("Out of memory!\n");
-        free(opcodes);
-        exit(1);
-    }
-    const size_t opcodes_len = opcodes_iterator - opcodes;
-
-    run_opcodes(opcodes, opcodes_len, cells);
-    dealloc_opcodes(opcodes, memlen);
-
-    free(cells);
+    // Convert to machine code and run
+    run_opcodes(opcodes, opcodes_len);
+    free(opcodes);
 }
 
