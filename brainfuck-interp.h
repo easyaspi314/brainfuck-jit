@@ -86,7 +86,7 @@ static void run_opcodes(bf_opcode *restrict opcodes, size_t len)
             }
             op->op = bf_opcode_ext_move;
             cell += op->amount;
-break;
+            break;
         case bf_opcode_ext_move:
             bf_log("cell += %d;\n", op->amount);
             cell += op->amount;
@@ -111,8 +111,7 @@ break;
             }
             op->op = bf_opcode_ext_add;
             *cell += op->amount;
-break;
-            // FALLTHROUGH
+            break;
         case bf_opcode_ext_add:
             bf_log("*cell += %d;\n", op->amount);
             *cell += op->amount;
