@@ -108,7 +108,7 @@ typedef struct {
 
 #  if defined(_WIN32) || defined(__CYGWIN__)
 #     include "brainfuck-jit-mmap-windows.h"
-#  elif defined(__unix__)
+#  elif defined(__unix__) || defined(__APPLE__)
 #     include "brainfuck-jit-mmap-unix.h"
 #  else
 #     error "Unknown OS!"
@@ -120,7 +120,7 @@ typedef struct {
 
 
 // Executes the code with light JIT optimization.
-void brainfuck(const char *code, size_t len)
+void brainfuck(const char *code, size_t len, int optlevel)
 {
     int32_t mode = bf_opcode_nop, combine = 0;
     bool leaf = false;
@@ -152,103 +152,151 @@ void brainfuck(const char *code, size_t len)
 
     bf_opcode *opcodes_iterator = opcodes;
 
-    for (size_t i = 0; i < len; i++) {
-        // We don't actually output opcodes immediately after reading an instruction. We actually
-        // delay by at least one instructions so we can join consecutive +- and <>s.
-        //
-        // As soon as we reach a loop, dot, or commma, or we end a chain of +- or <>, we call commit() and
-        // it will write to the opcodes_iterator. combine holds the number of additions or subtractions
-        // we use.
-        switch (code[i]) {
-        case bf_opcode_add: // increment value at pointer
-            if (mode != bf_opcode_add) {
-                commit(mode, combine, &opcodes_iterator);
-                mode = bf_opcode_add;
-                combine = 0;
-            }
-            ++combine;
-            break;
-        case bf_opcode_sub: // decrement value at pointer
-            if (mode != bf_opcode_add) {
-                commit(mode, combine, &opcodes_iterator);
-                mode = bf_opcode_add;
-                combine = 0;
-            }
-            --combine;
-            break;
-        case bf_opcode_move: // increment pointer
-            if (mode != bf_opcode_move) {
-                commit(mode, combine, &opcodes_iterator);
-                mode = bf_opcode_move;
-                combine = 0;
-            }
-            ++combine;
-            break;
-        case bf_opcode_move_left: // decrement pointer
-            if (mode != bf_opcode_move) {
-                commit(mode, combine, &opcodes_iterator);
-                mode = bf_opcode_move;
-                combine = 0;
-            }
-            --combine;
-            break;
-        case bf_opcode_start: // begin loop
-            commit(mode, combine, &opcodes_iterator);
-            mode = bf_opcode_start;
-            combine = 0;
-            leaf = true;
-            *loops_iterator++ = opcodes_iterator; // push the address of the next opcode to the stack
-            break;
-        case bf_opcode_end: { // end loop
-            if (loops_iterator == loops) { // if our stack is empty, fail
-                printf("position %zu: Extra ']'n", i);
-                free(loops);
-                free(opcodes);
-                exit(1);
-            }
-            // Pop from our stack
-            bf_opcode *start = *--loops_iterator;
+    // -O0 disables all optimizations, and uses unbuffered stdin.
+    if (optlevel < 1) {
+        setvbuf(stdout, NULL, _IONBF, 0);
 
-            // Basic optimization: Convert clear loops ([-] and [+]) to *cell = 0;
-            // Because of our delayed commit system, we can tell if this happened if we
-            // haven't moved from the previous bf_opcode_begin instruction (opcodes_iterator hasn't been
-            // incremented since then), and the mode of the previous instruction was bf_opcode_add.
+        for (size_t i = 0; i < len; i++) {
+            combine = 1;
+            int op = code[i];
+            switch (op) {
+            case bf_opcode_move_left:
+                op = bf_opcode_move;
+                combine = -1;
+                break;
+            case bf_opcode_sub:
+                op = bf_opcode_add;
+                combine = -1;
+                break;
+            case bf_opcode_start:
+                *loops_iterator++ = opcodes_iterator; // push the address of the next opcode to the stack
+                break;
+            case bf_opcode_end: {
+                if (loops_iterator == loops) { // if our stack is empty, fail
+                    printf("position %zu: Extra ']'n", i);
+                    free(loops);
+                    free(opcodes);
+                    exit(1);
+                }
+                // Pop from our stack
+                bf_opcode *start = *--loops_iterator;
+                fill_in_jump(start, &opcodes_iterator, false);
+                commit(op, combine, &opcodes_iterator);
+                continue;
+            }
+            case bf_opcode_move:
+            case bf_opcode_add:
+            case bf_opcode_put:
+            case bf_opcode_get:
+                break;
+            default:
+                continue;
+            }
+            commit(op, combine, &opcodes_iterator);
+        }
+    } else {
+        for (size_t i = 0; i < len; i++) {
+            // We don't actually output opcodes immediately after reading an instruction. We actually
+            // delay by at least one instructions so we can join consecutive +- and <>s.
             //
-            // We only do it with odd increments: Since arithmetic is modulo 256, something like
-            // [--] isn't guaranteed to not be an infinite loop.
-            if (start == opcodes_iterator - 1 && mode == bf_opcode_add) {
-                 bf_log("converting clear loop!!!\n");
-                 write_clear_loop(start, &opcodes_iterator);
-                 // Reset the mode
-                 mode = bf_opcode_nop;
-                 combine = 0;
-                 // break early
-                 break;
-            }
+            // As soon as we reach a loop, dot, or commma, or we end a chain of +- or <>, we call commit() and
+            // it will write to the opcodes_iterator. combine holds the number of additions or subtractions
+            // we use.
+            switch (code[i]) {
+            case bf_opcode_add: // increment value at pointer
+                if (mode != bf_opcode_add) {
+                    commit(mode, combine, &opcodes_iterator);
+                    mode = bf_opcode_add;
+                    combine = 0;
+                }
+                ++combine;
+                break;
+            case bf_opcode_sub: // decrement value at pointer
+                if (mode != bf_opcode_add) {
+                    commit(mode, combine, &opcodes_iterator);
+                    mode = bf_opcode_add;
+                    combine = 0;
+                }
+                --combine;
+                break;
+            case bf_opcode_move: // increment pointer
+                if (mode != bf_opcode_move) {
+                    commit(mode, combine, &opcodes_iterator);
+                    mode = bf_opcode_move;
+                    combine = 0;
+                }
+                ++combine;
+                break;
+            case bf_opcode_move_left: // decrement pointer
+                if (mode != bf_opcode_move) {
+                    commit(mode, combine, &opcodes_iterator);
+                    mode = bf_opcode_move;
+                    combine = 0;
+                }
+                --combine;
+                break;
+            case bf_opcode_start: // begin loop
+                commit(mode, combine, &opcodes_iterator);
+                mode = bf_opcode_start;
+                combine = 0;
+                leaf = true;
+                *loops_iterator++ = opcodes_iterator; // push the address of the next opcode to the stack
+                break;
+            case bf_opcode_end: { // end loop
+                if (loops_iterator == loops) { // if our stack is empty, fail
+                    printf("position %zu: Extra ']'n", i);
+                    free(loops);
+                    free(opcodes);
+                    exit(1);
+                }
+                // Pop from our stack
+                bf_opcode *start = *--loops_iterator;
 
-            commit(mode, combine, &opcodes_iterator);
-            mode = bf_opcode_end;
-            combine = 0;
-            if (fill_in_jump(start, &opcodes_iterator, leaf)) {
-                mode = bf_opcode_nop;
+                // Basic optimization: Convert clear loops ([-] and [+]) to *cell = 0;
+                // Because of our delayed commit system, we can tell if this happened if we
+                // haven't moved from the previous bf_opcode_begin instruction (opcodes_iterator hasn't been
+                // incremented since then), and the mode of the previous instruction was bf_opcode_add.
+                //
+                // We only do it with odd increments: Since arithmetic is modulo 256, something like
+                // [--] isn't guaranteed to not be an infinite loop.
+                if (optlevel > 1 && start == opcodes_iterator - 1 && mode == bf_opcode_add) {
+                     bf_log("converting clear loop!!!\n");
+                     write_clear_loop(start, &opcodes_iterator);
+                     // Reset the mode
+                     mode = bf_opcode_nop;
+                     combine = 0;
+                     // break early
+                     break;
+                }
+
+                commit(mode, combine, &opcodes_iterator);
+                mode = bf_opcode_end;
+                combine = 0;
+                if (fill_in_jump(start, &opcodes_iterator, optlevel > 1 && leaf)) {
+                    mode = bf_opcode_nop;
+                }
+                leaf = false; // not in a leaf anymore
+                break;
             }
-            leaf = false; // not in a leaf anymore
-            break;
+            case bf_opcode_put: // putchar()
+                commit(mode, combine, &opcodes_iterator); // always commit
+                mode = bf_opcode_put;
+                combine = 0;
+                break;
+            case bf_opcode_get: // getchar()
+                commit(mode, combine, &opcodes_iterator);
+                mode = bf_opcode_get;
+                combine = 0;
+                break;
+            default: // ignore
+                break;
+            }
         }
-        case bf_opcode_put: // putchar()
-            commit(mode, combine, &opcodes_iterator); // always commit
-            mode = bf_opcode_put;
-            combine = 0;
-            break;
-        case bf_opcode_get: // getchar()
-            commit(mode, combine, &opcodes_iterator);
-            mode = bf_opcode_get;
-            combine = 0;
-            break;
-        default: // ignore
-            break;
-        }
+        // Last call to commit() to handle the final instruction
+        commit(mode, combine, &opcodes_iterator);
     }
+    size_t opcodes_len = opcodes_iterator - opcodes;
+
     if (loops_iterator != loops) { // missing ]
         printf("Position %zu: Missing ]\n", len - 1);
         free(opcodes);
@@ -259,9 +307,6 @@ void brainfuck(const char *code, size_t len)
     // We don't need this anymore.
     free(loops);
 
-    // Last call to commit() to handle the final instruction
-    commit(mode, combine, &opcodes_iterator);
-    size_t opcodes_len = opcodes_iterator - opcodes;
 
     // Convert to machine code and run
     run_opcodes(opcodes, opcodes_len);

@@ -14,7 +14,7 @@
 
 #ifndef BRAINFUCK_JIT_UNIX_H
 #define BRAINFUCK_JIT_UNIX_H
-#ifndef __unix__
+#if !defined(__unix__) && !defined(__APPLE__)
 #   error "This code is for Unix."
 #endif
 

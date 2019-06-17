@@ -7,9 +7,16 @@
 
 int main(int argc, char *argv[])
 {
+    int optlevel = 2;
+    if (argc > 1 && argv[1][0] == '-' && argv[1][1] == 'O') {
+        optlevel = argv[1][2] - '0';
+        ++argv;
+        --argc;
+    }
+
     if (argc == 1) {
         const char test[] = ">++[<+++++++++++++>-]<[[>+>+<<-]>[<+>-]++++++++[>++++++++<-]>.[-]<<>++++++++++[>++++++++++[>++++++++++[>++++++++++[>++++++++++[>++++++++++[>++++++++++[-]<-]<-]<-]<-]<-]<-]<-]++++++++++.";
-        brainfuck(test, sizeof(test));
+        brainfuck(test, sizeof(test), optlevel);
     } else {
         // Easier to use unistd instead of stdio
         int fd = open(argv[1], O_RDONLY);
@@ -38,7 +45,7 @@ int main(int argc, char *argv[])
         }
         close(fd);
         buf[len] = '\0';
-        brainfuck(buf, len);
+        brainfuck(buf, len, optlevel);
         free(buf);
     }
 }

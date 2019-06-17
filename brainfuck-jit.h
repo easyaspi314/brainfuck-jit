@@ -24,7 +24,7 @@ extern "C" {
  *
  * JIT compiles a Brainfuck string. The string is passed into code, with the corresponding length.
  */
-void brainfuck(const char *code, size_t len);
+void brainfuck(const char *code, size_t len, int optlevel);
 
 #ifdef __cplusplus
 }
